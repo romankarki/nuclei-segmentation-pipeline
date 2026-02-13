@@ -6,8 +6,8 @@ scikit-learn>=1.3.0
 opencv-python>=4.8.0
 
 # Stain normalization
-staintools>=2.1.2
-spams>=2.6.5.4
+# Note: staintools/spams removed - incompatible with Python 3.12+
+# Our implementation uses scikit-learn NMF as a fallback for Vahadane
 
 # Visualization
 matplotlib>=3.7.0
