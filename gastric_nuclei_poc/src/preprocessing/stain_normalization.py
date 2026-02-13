@@ -144,8 +144,19 @@ def normalize_macenko(image, target_image=None, alpha=1, beta=0.15):
         v1 = np.array([np.cos(min_angle), np.sin(min_angle)]) @ plane
         v2 = np.array([np.cos(max_angle), np.sin(max_angle)]) @ plane
 
-        # Ensure hematoxylin is first (darker stain)
-        if v1[0] < v2[0]:
+        # Ensure vectors point in the positive OD direction
+        if np.sum(v1) < 0:
+            v1 = -v1
+        if np.sum(v2) < 0:
+            v2 = -v2
+
+        # Assign H vs E using cosine similarity to reference vectors
+        # (more robust than comparing a single channel)
+        ref_H = HEref[0]  # [0.5626, 0.7201, 0.4062]
+        sim_v1_H = abs(np.dot(v1, ref_H)) / (np.linalg.norm(v1) * np.linalg.norm(ref_H) + 1e-10)
+        sim_v2_H = abs(np.dot(v2, ref_H)) / (np.linalg.norm(v2) * np.linalg.norm(ref_H) + 1e-10)
+
+        if sim_v1_H >= sim_v2_H:
             stain_vectors = np.array([v1, v2])
         else:
             stain_vectors = np.array([v2, v1])

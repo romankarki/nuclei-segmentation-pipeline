@@ -2,11 +2,20 @@
 Nuclei segmentation using thresholding and marker-controlled watershed.
 
 Implements:
-1. Simple Otsu + Watershed (baseline comparison)
+1. Li/Otsu threshold + Watershed (baseline and normalization methods)
 2. Adaptive thresholding + Watershed (paper's proposed method)
 3. Full pipeline with morphological operations and area-based correction
 
 Reference: Paper Sections 3.5 and 3.6
+
+NOTE: Li's minimum cross-entropy threshold is used by default instead of
+Otsu because it handles the unequal foreground/background distribution of
+nuclei segmentation much better (nuclei are typically <50% of the image).
+Otsu assumes roughly equal class variances, which fails on hard images.
+
+NOTE: The paper uses 1000x1000 images. All morphological parameters are
+automatically scaled based on actual image resolution so the pipeline
+works correctly on smaller images (e.g., 256x256 TNBC patches).
 """
 
 import numpy as np
@@ -22,24 +31,56 @@ from skimage.morphology import (
 from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
 from skimage.measure import label, regionprops
+from skimage.filters import threshold_li
 
 
 # ============================================================================
-# Baseline: Simple Otsu + Watershed
+# Resolution-adaptive parameter helper
 # ============================================================================
-def segment_otsu_watershed(image, min_nucleus_area=150):
+def _scale_params(image):
     """
-    Basic nuclei segmentation: global Otsu threshold + watershed.
+    Compute resolution-scaled morphological parameters.
 
-    This is the baseline method WITHOUT any stain normalization.
-    Operates on the grayscale or hematoxylin channel.
+    The paper's parameters are calibrated for ~1000x1000 images.
+    This function scales them proportionally for any image size.
+
+    Returns dict with: min_area, disk_r, hole_area, min_dist, block_size
+    """
+    h, w = image.shape[:2] if image.ndim == 3 else image.shape
+    # Scale factor: 1.0 for 1000x1000, ~0.065 for 256x256
+    scale = (h * w) / 1_000_000
+    # Linear dimension scale: 1.0 for 1000, 0.256 for 256
+    lin_scale = min(h, w) / 1000
+
+    return {
+        "min_area": max(10, int(150 * scale)),
+        "disk_r": max(1, round(3 * lin_scale)),
+        "hole_area": max(30, int(500 * scale)),
+        "min_dist": max(3, round(8 * lin_scale)),
+        "block_size": max(11, int(51 * lin_scale)) | 1,  # must be odd
+        "gauss_ksize": max(3, int(7 * lin_scale)) | 1,   # must be odd
+    }
+
+
+# ============================================================================
+# Global Threshold + Watershed (supports both Li and Otsu)
+# ============================================================================
+def segment_otsu_watershed(image, min_nucleus_area=None, threshold_method='li'):
+    """
+    Nuclei segmentation: global threshold + watershed.
+
+    Supports multiple threshold methods. Li's minimum cross-entropy
+    threshold is the default because it handles the unequal class
+    distribution of nuclei segmentation better than Otsu.
 
     Parameters
     ----------
     image : np.ndarray
         Input image (RGB or grayscale)
-    min_nucleus_area : int
-        Minimum nucleus area in pixels
+    min_nucleus_area : int or None
+        Minimum nucleus area in pixels. If None, auto-scaled from resolution.
+    threshold_method : str
+        'li' (default, recommended) or 'otsu'
 
     Returns
     -------
@@ -48,6 +89,10 @@ def segment_otsu_watershed(image, min_nucleus_area=150):
     labeled : np.ndarray
         Labeled nuclei (each nucleus has unique integer ID)
     """
+    params = _scale_params(image)
+    if min_nucleus_area is None:
+        min_nucleus_area = params["min_area"]
+
     # Convert to grayscale if needed
     if image.ndim == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -57,26 +102,46 @@ def segment_otsu_watershed(image, min_nucleus_area=150):
     # Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 1)
 
-    # Global Otsu thresholding
-    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    binary = binary.astype(bool)
+    # Global thresholding
+    if threshold_method == 'li':
+        # Li's minimum cross-entropy threshold — better for nuclei
+        thresh = threshold_li(blurred)
+        binary = (blurred < thresh)  # nuclei are dark
+    else:
+        # Otsu's threshold (legacy)
+        _, binary = cv2.threshold(blurred, 0, 255,
+                                  cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        binary = binary.astype(bool)
 
-    # Morphological cleaning
-    binary = remove_small_holes(binary, area_threshold=500)
+    # Auto-detect polarity: nuclei should be the minority class.
+    fg_frac = np.sum(binary) / binary.size
+    if fg_frac > 0.50:
+        binary = ~binary
+
+    # Morphological cleaning (resolution-scaled)
+    binary = remove_small_holes(binary, area_threshold=params["hole_area"])
     binary = remove_small_objects(binary, min_size=min_nucleus_area)
 
-    # Opening to smooth borders
-    selem = disk(3)
+    # Opening to smooth borders (resolution-scaled disk)
+    selem = disk(params["disk_r"])
     binary = opening(binary, selem)
 
     # Distance transform for watershed markers
     distance = ndimage.distance_transform_edt(binary)
-    distance_smooth = cv2.GaussianBlur(distance, (7, 7), 2)
+    gk = params["gauss_ksize"]
+    distance_smooth = cv2.GaussianBlur(distance, (gk, gk), 2)
 
     # Find markers (local maxima of distance transform)
     coords = peak_local_max(
-        distance_smooth, min_distance=8, labels=binary.astype(int)
+        distance_smooth, min_distance=params["min_dist"],
+        labels=binary.astype(int)
     )
+
+    if len(coords) == 0:
+        segmented = binary.astype(np.uint8)
+        labeled_out = label(segmented)
+        return segmented, labeled_out
+
     mask = np.zeros(distance_smooth.shape, dtype=bool)
     mask[tuple(coords.T)] = True
     markers = label(mask)
@@ -165,7 +230,7 @@ def _compute_threshold_candidates(gray_image):
 def segment_adaptive_watershed(
     image,
     h_channel=None,
-    min_nucleus_area=150,
+    min_nucleus_area=None,
     correction_ratio=0.23,
 ):
     """
@@ -185,8 +250,9 @@ def segment_adaptive_watershed(
         Input image (RGB or grayscale)
     h_channel : np.ndarray or None
         Hematoxylin channel (grayscale). If None, derived from image.
-    min_nucleus_area : int
-        Minimum nucleus area in pixels (chi_min in paper)
+    min_nucleus_area : int or None
+        Minimum nucleus area in pixels (chi_min in paper).
+        If None, auto-scaled from resolution.
     correction_ratio : float
         Area-based correction ratio (23% in paper)
 
@@ -197,6 +263,10 @@ def segment_adaptive_watershed(
     labeled : np.ndarray
         Labeled nuclei
     """
+    params = _scale_params(image)
+    if min_nucleus_area is None:
+        min_nucleus_area = params["min_area"]
+
     # Prepare the channel for segmentation
     if h_channel is not None:
         gray = h_channel.copy()
@@ -224,8 +294,7 @@ def segment_adaptive_watershed(
 
     for thresh in candidates:
         # Local adaptive thresholding with candidate as sensitivity
-        # The sensitivity parameter controls how much the threshold adapts
-        block_size = 51  # Must be odd
+        block_size = params["block_size"]
         C = (1 - thresh) * 255  # Convert sensitivity to constant offset
 
         gray_uint8 = (gray_smooth * 255).astype(np.uint8)
@@ -235,8 +304,12 @@ def segment_adaptive_watershed(
         )
         binary = binary.astype(bool)
 
+        # Auto-detect polarity: if foreground > 50%, invert
+        if np.sum(binary) / binary.size > 0.50:
+            binary = ~binary
+
         # Quick morphological cleanup
-        binary = remove_small_objects(binary, min_size=min_nucleus_area // 2)
+        binary = remove_small_objects(binary, min_size=max(5, min_nucleus_area // 2))
 
         if np.sum(binary) == 0:
             continue
@@ -263,8 +336,8 @@ def segment_adaptive_watershed(
     # Fill holes
     binary = ndimage.binary_fill_holes(binary)
 
-    # Opening with disk(3)
-    selem = disk(3)
+    # Opening (resolution-scaled disk)
+    selem = disk(params["disk_r"])
     binary = opening(binary, selem)
 
     # Remove small objects below chi_min
@@ -272,13 +345,17 @@ def segment_adaptive_watershed(
 
     # ---- Marker-controlled Watershed ----
     distance = ndimage.distance_transform_edt(binary)
-    distance_smooth = cv2.GaussianBlur(distance.astype(np.float32), (7, 7), 2)
+    gk = params["gauss_ksize"]
+    distance_smooth = cv2.GaussianBlur(distance.astype(np.float32), (gk, gk), 2)
 
     # Extended-minima transform (H-minima + regional minima)
     h_value = 2  # H-minima suppression height
     suppressed = distance_smooth.copy()
     suppressed = np.maximum(suppressed - h_value, 0)
-    coords = peak_local_max(suppressed, min_distance=5, labels=binary.astype(int))
+    coords = peak_local_max(
+        suppressed, min_distance=params["min_dist"],
+        labels=binary.astype(int)
+    )
 
     if len(coords) == 0:
         segmented = binary.astype(np.uint8)
@@ -304,7 +381,7 @@ def segment_adaptive_watershed(
     return segmented, labeled
 
 
-def _area_based_correction(labeled, min_area=150, correction_ratio=0.23):
+def _area_based_correction(labeled, min_area=10, correction_ratio=0.23):
     """
     Area-based correction: remove objects smaller than 23% of mean area.
 
@@ -334,8 +411,8 @@ def _area_based_correction(labeled, min_area=150, correction_ratio=0.23):
 def segment_nuclei(
     image,
     h_channel=None,
-    method="adaptive",
-    min_nucleus_area=150,
+    method="li",
+    min_nucleus_area=None,
     **kwargs,
 ):
     """
@@ -348,7 +425,11 @@ def segment_nuclei(
     h_channel : np.ndarray or None
         Hematoxylin channel from stain normalization/deconvolution
     method : str
-        'otsu' for baseline, 'adaptive' for paper's method
+        'li' for Li threshold + watershed (recommended),
+        'otsu' for Otsu threshold + watershed,
+        'adaptive' for paper's adaptive threshold method
+    min_nucleus_area : int or None
+        If None, auto-scaled from image resolution.
 
     Returns
     -------
@@ -357,10 +438,12 @@ def segment_nuclei(
     labeled : np.ndarray
         Labeled nuclei
     """
-    if method == "otsu":
+    if method in ("li", "otsu"):
         if h_channel is not None:
-            return segment_otsu_watershed(h_channel, min_nucleus_area)
-        return segment_otsu_watershed(image, min_nucleus_area)
+            return segment_otsu_watershed(h_channel, min_nucleus_area,
+                                          threshold_method=method)
+        return segment_otsu_watershed(image, min_nucleus_area,
+                                      threshold_method=method)
     elif method == "adaptive":
         return segment_adaptive_watershed(
             image, h_channel, min_nucleus_area, **kwargs

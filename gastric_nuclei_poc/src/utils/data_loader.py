@@ -138,11 +138,11 @@ def load_all_datasets(data_root, max_images=None):
     dict mapping dataset name to (images, masks, names)
     """
     datasets = {}
-    for name in ["monuseg", "tnbc"]:
+    for name in ["monuseg", "monuseg_full", "tnbc"]:
         try:
             images, masks, names = load_dataset(data_root, name, max_images)
             datasets[name] = {"images": images, "masks": masks, "names": names}
-            print(f"Loaded {name}: {len(images)} images")
+            print(f"Loaded {name}: {len(images)} images, resolution {images[0].shape[1]}x{images[0].shape[0]}")
         except FileNotFoundError as e:
             print(f"Warning: Could not load {name}: {e}")
     return datasets

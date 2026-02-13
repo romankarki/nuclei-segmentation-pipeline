@@ -170,11 +170,23 @@ def deconvolve_pca(image, beta=0.15):
     # Convert back to OD space
     v1 = np.array([np.cos(min_angle), np.sin(min_angle)]) @ plane
     v2 = np.array([np.cos(max_angle), np.sin(max_angle)]) @ plane
+
+    # Ensure vectors point in the positive OD direction
+    if np.sum(v1) < 0:
+        v1 = -v1
+    if np.sum(v2) < 0:
+        v2 = -v2
+
     v1 = _normalize_vector(v1)
     v2 = _normalize_vector(v2)
 
-    # Ensure v1 is hematoxylin (first component in red channel should be larger)
-    if v1[0] < v2[0]:
+    # Assign H vs E using cosine similarity to reference vectors
+    ref_H = np.array([0.6500286, 0.704031, 0.2860126])
+    ref_H = _normalize_vector(ref_H)
+    sim_v1_H = abs(np.dot(v1, ref_H))
+    sim_v2_H = abs(np.dot(v2, ref_H))
+
+    if sim_v1_H >= sim_v2_H:
         stain_vectors = np.array([v1, v2])
     else:
         stain_vectors = np.array([v2, v1])

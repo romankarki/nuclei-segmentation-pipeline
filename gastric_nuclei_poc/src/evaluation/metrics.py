@@ -161,26 +161,52 @@ def aggregated_jaccard_index(gt_mask, pred_mask):
     if len(gt_ids) == 0 or len(pred_ids) == 0:
         return 0.0
 
+    # Pre-compute bounding boxes and areas for faster matching
+    from skimage.measure import regionprops as _rp
+
+    gt_props = {p.label: p for p in _rp(gt_labeled)}
+    pred_props = {p.label: p for p in _rp(pred_labeled)}
+
+    # Pre-compute pred areas
+    pred_areas = {pid: p.area for pid, p in pred_props.items()}
+
     # For each GT nucleus, find the best matching predicted nucleus
     used_pred = set()
     total_intersection = 0
     total_union = 0
 
     for gt_id in gt_ids:
-        gt_region = (gt_labeled == gt_id)
+        gt_prop = gt_props[gt_id]
+        gt_bbox = gt_prop.bbox  # (min_row, min_col, max_row, max_col)
+        gt_area = gt_prop.area
+
         best_iou = 0
         best_pred_id = None
         best_intersection = 0
         best_union = 0
 
         for pred_id in pred_ids:
-            pred_region = (pred_labeled == pred_id)
-            intersection = np.sum(gt_region & pred_region)
+            pred_prop = pred_props[pred_id]
+            pb = pred_prop.bbox
+
+            # Quick bounding-box overlap test to skip non-overlapping pairs
+            if (pb[2] <= gt_bbox[0] or pb[0] >= gt_bbox[2] or
+                    pb[3] <= gt_bbox[1] or pb[1] >= gt_bbox[3]):
+                continue
+
+            # Compute intersection only in overlapping bounding box region
+            r0 = max(gt_bbox[0], pb[0])
+            r1 = min(gt_bbox[2], pb[2])
+            c0 = max(gt_bbox[1], pb[1])
+            c1 = min(gt_bbox[3], pb[3])
+            gt_crop = gt_labeled[r0:r1, c0:c1] == gt_id
+            pred_crop = pred_labeled[r0:r1, c0:c1] == pred_id
+            intersection = np.sum(gt_crop & pred_crop)
 
             if intersection == 0:
                 continue
 
-            union = np.sum(gt_region | pred_region)
+            union = gt_area + pred_areas[pred_id] - intersection
             iou = intersection / union if union > 0 else 0
 
             if iou > best_iou:
@@ -195,12 +221,12 @@ def aggregated_jaccard_index(gt_mask, pred_mask):
             used_pred.add(best_pred_id)
         else:
             # No matching prediction found -> union is just the GT area
-            total_union += np.sum(gt_region)
+            total_union += gt_area
 
     # Add falsely predicted nuclei (no GT match)
     for pred_id in pred_ids:
         if pred_id not in used_pred:
-            total_union += np.sum(pred_labeled == pred_id)
+            total_union += pred_areas[pred_id]
 
     if total_union == 0:
         return 0.0
