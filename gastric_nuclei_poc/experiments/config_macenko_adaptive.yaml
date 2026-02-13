@@ -1,0 +1,37 @@
+# Paper's Best Configuration
+# Macenko stain normalization + Adaptive thresholding + Watershed
+
+pipeline:
+  name: "Macenko + Adaptive Watershed"
+  description: "Paper's proposed method achieving F1=0.854 on gastric cancer"
+
+preprocessing:
+  blur_removal: true
+  blur_method: "laplacian"
+  blur_threshold: 0.15
+
+  stain_normalization: "macenko"
+  macenko_alpha: 1
+  macenko_beta: 0.15
+
+  stain_deconvolution: null
+
+segmentation:
+  method: "adaptive"
+  min_nucleus_area: 150
+  # MANA-inspired adaptive threshold selection
+  use_pwmcurve: true
+  polynomial_order: 15
+
+postprocessing:
+  morphological_opening: true
+  opening_radius: 3
+  watershed: true
+  h_minima_height: 2
+  area_correction: true
+  correction_ratio: 0.23
+
+# Reference metrics from paper (Table 2, gastric cancer dataset):
+# F1 = 0.854 ± 0.068
+# Dice = 0.695 ± 0.058
+# AJI = 0.389 ± 0.095

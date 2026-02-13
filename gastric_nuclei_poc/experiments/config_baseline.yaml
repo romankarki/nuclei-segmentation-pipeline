@@ -1,0 +1,21 @@
+# Baseline Configuration
+# No stain normalization, basic Otsu thresholding
+
+pipeline:
+  name: "Baseline"
+  description: "Basic segmentation without preprocessing"
+
+preprocessing:
+  blur_removal: false
+  stain_normalization: null
+  stain_deconvolution: null
+
+segmentation:
+  method: "otsu"
+  min_nucleus_area: 150
+
+postprocessing:
+  morphological_opening: true
+  opening_radius: 3
+  area_correction: true
+  correction_ratio: 0.23
