@@ -1,0 +1,50 @@
+# Data files - do not commit datasets
+data/
+gastric_nuclei_poc/data/
+
+# PDF papers
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Experiment outputs
+gastric_nuclei_poc/experiments/*.csv
+gastric_nuclei_poc/experiments/*.json
+
+# Model weights
+*.pth
+*.h5
+*.ckpt
+
+# Logs
+*.log
