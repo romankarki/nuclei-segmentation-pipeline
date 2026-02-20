@@ -101,8 +101,10 @@ def normalize_macenko(image, target_image=None, alpha=1, beta=0.15,
     max_conc_target : array-like of length 2, or None
         Target 99th-percentile concentrations [hematoxylin, eosin].
         Controls overall stain intensity of the output. Higher values
-        produce darker/more saturated results. Default is [1.9705, 1.0308].
-        Try [2.5, 1.3] or [3.0, 1.5] if the output looks too faded.
+        produce darker/more saturated results. Default is [2.8, 1.5]
+        to avoid washed-out normalization on MoNuSeg-like images.
+        You can tune this per dataset, e.g. [2.4, 1.3] (lighter)
+        or [3.0, 1.6] (stronger).
 
     Returns
     -------
@@ -196,7 +198,7 @@ def normalize_macenko(image, target_image=None, alpha=1, beta=0.15,
     else:
         target_stain = HEref
         if max_conc_target is None:
-            max_conc_target = np.array([1.9705, 1.0308])
+            max_conc_target = np.array([2.8, 1.5])
         else:
             max_conc_target = np.asarray(max_conc_target, dtype=np.float64)
 
@@ -339,7 +341,7 @@ def normalize_vahadane_simple(image, target_image=None):
     # Normalize concentrations
     max_conc_s = np.percentile(source_conc, 99, axis=0)
     max_conc_s[max_conc_s == 0] = 1
-    max_conc_t = np.array([1.9705, 1.0308])
+    max_conc_t = np.array([2.8, 1.5])
 
     conc_normalized = source_conc * (max_conc_t / max_conc_s)
 
