@@ -7,9 +7,8 @@ using stain normalization and blurred artifact removal"
 (Martos et al., Pathology - Research and Practice, 2023)
 
 Usage:
-    python run_poc.py                    # Run with defaults
-    python run_poc.py --dataset monuseg  # Run on MoNuSeg only
-    python run_poc.py --dataset tnbc     # Run on TNBC only
+    python run_poc.py                              # Run with defaults
+    python run_poc.py --dataset monuseg_full       # Run on MoNuSeg Full only
     python run_poc.py --max-images 5     # Limit images for quick test
     python run_poc.py --save-visuals     # Save visual outputs
 """
@@ -120,7 +119,7 @@ def main():
         "--dataset",
         type=str,
         default="all",
-        choices=["monuseg", "tnbc", "all"],
+        choices=["monuseg_full", "all"],
         help="Which dataset to evaluate on (default: all)",
     )
     parser.add_argument(
@@ -164,7 +163,7 @@ def main():
     # Load datasets
     print(f"\nLoading data from: {args.data_root}")
     if args.dataset == "all":
-        dataset_names = ["monuseg", "tnbc"]
+        dataset_names = ["monuseg_full"]
     else:
         dataset_names = [args.dataset]
 

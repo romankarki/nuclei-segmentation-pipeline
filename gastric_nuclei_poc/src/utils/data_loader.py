@@ -26,7 +26,7 @@ def load_mask(path):
     return (mask > 0).astype(np.uint8)
 
 
-def get_dataset_paths(data_root, dataset_name="monuseg"):
+def get_dataset_paths(data_root, dataset_name="monuseg_full"):
     """
     Get matched lists of image and mask file paths for a dataset.
 
@@ -35,7 +35,7 @@ def get_dataset_paths(data_root, dataset_name="monuseg"):
     data_root : str
         Root directory containing the data folders (e.g., '../../data')
     dataset_name : str
-        One of 'monuseg' or 'tnbc'
+        One of 'monuseg_full', 'monuseg', or 'tnbc'
 
     Returns
     -------
@@ -68,7 +68,7 @@ def get_dataset_paths(data_root, dataset_name="monuseg"):
     return image_paths, mask_paths
 
 
-def load_dataset(data_root, dataset_name="monuseg", max_images=None):
+def load_dataset(data_root, dataset_name="monuseg_full", max_images=None):
     """
     Load all images and masks for a dataset.
 
@@ -77,7 +77,7 @@ def load_dataset(data_root, dataset_name="monuseg", max_images=None):
     data_root : str
         Root directory containing the data folders
     dataset_name : str
-        One of 'monuseg' or 'tnbc'
+        One of 'monuseg_full', 'monuseg', or 'tnbc'
     max_images : int or None
         Limit number of images to load (for quick testing)
 
@@ -138,7 +138,7 @@ def load_all_datasets(data_root, max_images=None):
     dict mapping dataset name to (images, masks, names)
     """
     datasets = {}
-    for name in ["monuseg", "monuseg_full", "tnbc"]:
+    for name in ["monuseg_full"]:
         try:
             images, masks, names = load_dataset(data_root, name, max_images)
             datasets[name] = {"images": images, "masks": masks, "names": names}

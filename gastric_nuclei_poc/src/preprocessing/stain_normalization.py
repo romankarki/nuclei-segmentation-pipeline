@@ -72,7 +72,8 @@ def _normalize_rows(matrix):
     return matrix / norms
 
 
-def normalize_macenko(image, target_image=None, alpha=1, beta=0.15):
+def normalize_macenko(image, target_image=None, alpha=1, beta=0.15,
+                      max_conc_target=None):
     """
     Macenko stain normalization (SVD-geodesic method).
 
@@ -97,6 +98,11 @@ def normalize_macenko(image, target_image=None, alpha=1, beta=0.15):
         Percentile parameter (99th percentile when alpha=1)
     beta : float
         Threshold for transparent pixel removal in OD space
+    max_conc_target : array-like of length 2, or None
+        Target 99th-percentile concentrations [hematoxylin, eosin].
+        Controls overall stain intensity of the output. Higher values
+        produce darker/more saturated results. Default is [1.9705, 1.0308].
+        Try [2.5, 1.3] or [3.0, 1.5] if the output looks too faded.
 
     Returns
     -------
@@ -182,11 +188,17 @@ def normalize_macenko(image, target_image=None, alpha=1, beta=0.15):
 
     if target_image is not None:
         target_stain = _estimate_stain_vectors(target_image, alpha, beta)
-        target_conc = _get_concentrations(target_image, target_stain)
-        max_conc_target = np.percentile(target_conc, 99, axis=0)
+        if max_conc_target is None:
+            target_conc = _get_concentrations(target_image, target_stain)
+            max_conc_target = np.percentile(target_conc, 99, axis=0)
+        else:
+            max_conc_target = np.asarray(max_conc_target, dtype=np.float64)
     else:
         target_stain = HEref
-        max_conc_target = np.array([1.9705, 1.0308])
+        if max_conc_target is None:
+            max_conc_target = np.array([1.9705, 1.0308])
+        else:
+            max_conc_target = np.asarray(max_conc_target, dtype=np.float64)
 
     # Normalize
     max_conc_source[max_conc_source == 0] = 1
