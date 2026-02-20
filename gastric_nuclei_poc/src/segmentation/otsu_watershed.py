@@ -63,9 +63,74 @@ def _scale_params(image):
 
 
 # ============================================================================
+# Polarity helper
+# ============================================================================
+def _polarity_quality(binary, min_nucleus_area):
+    """
+    Heuristic quality score for a binary foreground mask.
+
+    Used when nuclei polarity is unknown (dark vs bright). We prefer masks
+    with realistic foreground fraction and plausible nucleus object sizes.
+    """
+    fg_frac = float(np.mean(binary))
+    if fg_frac <= 0.003 or fg_frac >= 0.85:
+        return -np.inf
+
+    quick_min_area = max(5, int(min_nucleus_area // 3))
+    quick = remove_small_objects(binary, min_size=quick_min_area)
+    labeled = label(quick)
+    n_obj = int(labeled.max())
+    if n_obj == 0:
+        return -np.inf
+
+    props = regionprops(labeled)
+    med_area = np.median([p.area for p in props]) if props else min_nucleus_area
+    target_area = max(min_nucleus_area, 20)
+
+    # Prefer foreground around ~18%, with many medium-sized nucleus objects.
+    frac_term = -6.0 * abs(fg_frac - 0.18)
+    count_term = 0.004 * min(n_obj, 600)
+    size_term = -abs(np.log((med_area + 1.0) / (target_area + 1.0)))
+    return frac_term + count_term + size_term
+
+
+def _select_foreground_polarity(binary_dark, min_nucleus_area, nuclei_are_dark):
+    """
+    Select foreground polarity.
+
+    Parameters
+    ----------
+    binary_dark : np.ndarray(bool)
+        Foreground mask assuming nuclei are dark.
+    min_nucleus_area : int
+        Minimum area prior.
+    nuclei_are_dark : bool or "auto"
+        True  -> use dark-nuclei mask
+        False -> use bright-nuclei mask
+        "auto" -> pick the better mask using heuristic quality.
+    """
+    if nuclei_are_dark is True:
+        return binary_dark
+    if nuclei_are_dark is False:
+        return ~binary_dark
+    if nuclei_are_dark != "auto":
+        raise ValueError("nuclei_are_dark must be True, False, or 'auto'")
+
+    binary_bright = ~binary_dark
+    score_dark = _polarity_quality(binary_dark, min_nucleus_area)
+    score_bright = _polarity_quality(binary_bright, min_nucleus_area)
+    return binary_dark if score_dark >= score_bright else binary_bright
+
+
+# ============================================================================
 # Global Threshold + Watershed (supports both Li and Otsu)
 # ============================================================================
-def segment_otsu_watershed(image, min_nucleus_area=None, threshold_method='li'):
+def segment_otsu_watershed(
+    image,
+    min_nucleus_area=None,
+    threshold_method="li",
+    nuclei_are_dark=True,
+):
     """
     Nuclei segmentation: global threshold + watershed.
 
@@ -81,6 +146,11 @@ def segment_otsu_watershed(image, min_nucleus_area=None, threshold_method='li'):
         Minimum nucleus area in pixels. If None, auto-scaled from resolution.
     threshold_method : str
         'li' (default, recommended) or 'otsu'
+    nuclei_are_dark : bool or "auto"
+        Foreground polarity prior.
+        - True: nuclei are darker than background
+        - False: nuclei are brighter than background
+        - "auto": choose polarity from image statistics
 
     Returns
     -------
@@ -103,19 +173,25 @@ def segment_otsu_watershed(image, min_nucleus_area=None, threshold_method='li'):
     blurred = cv2.GaussianBlur(gray, (5, 5), 1)
 
     # Global thresholding
-    if threshold_method == 'li':
-        # Li's minimum cross-entropy threshold — better for nuclei
+    if threshold_method == "li":
+        # Li threshold with dark-nuclei polarity as baseline.
         thresh = threshold_li(blurred)
-        binary = (blurred < thresh)  # nuclei are dark
-    else:
+        binary_dark = (blurred < thresh)
+    elif threshold_method == "otsu":
         # Otsu's threshold (legacy)
-        _, binary = cv2.threshold(blurred, 0, 255,
-                                  cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        binary = binary.astype(bool)
+        _, binary_dark = cv2.threshold(
+            blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
+        binary_dark = binary_dark.astype(bool)
+    else:
+        raise ValueError(f"Unknown threshold_method: {threshold_method}")
 
-    # Auto-detect polarity: nuclei should be the minority class.
-    fg_frac = np.sum(binary) / binary.size
-    if fg_frac > 0.50:
+    binary = _select_foreground_polarity(
+        binary_dark, min_nucleus_area, nuclei_are_dark
+    )
+
+    # Safety check: nuclei should usually be the minority class.
+    if np.mean(binary) > 0.50:
         binary = ~binary
 
     # Morphological cleaning (resolution-scaled)
@@ -232,6 +308,7 @@ def segment_adaptive_watershed(
     h_channel=None,
     min_nucleus_area=None,
     correction_ratio=0.23,
+    nuclei_are_dark=True,
 ):
     """
     Paper's proposed segmentation: adaptive thresholding + watershed.
@@ -255,6 +332,8 @@ def segment_adaptive_watershed(
         If None, auto-scaled from resolution.
     correction_ratio : float
         Area-based correction ratio (23% in paper)
+    nuclei_are_dark : bool or "auto"
+        Foreground polarity prior (same semantics as segment_otsu_watershed).
 
     Returns
     -------
@@ -298,14 +377,15 @@ def segment_adaptive_watershed(
         C = (1 - thresh) * 255  # Convert sensitivity to constant offset
 
         gray_uint8 = (gray_smooth * 255).astype(np.uint8)
-        binary = cv2.adaptiveThreshold(
+        binary_dark = cv2.adaptiveThreshold(
             gray_uint8, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV, block_size, C
         )
-        binary = binary.astype(bool)
-
-        # Auto-detect polarity: if foreground > 50%, invert
-        if np.sum(binary) / binary.size > 0.50:
+        binary_dark = binary_dark.astype(bool)
+        binary = _select_foreground_polarity(
+            binary_dark, max(5, min_nucleus_area // 2), nuclei_are_dark
+        )
+        if np.mean(binary) > 0.50:
             binary = ~binary
 
         # Quick morphological cleanup
@@ -328,7 +408,11 @@ def segment_adaptive_watershed(
 
     if best_binary is None:
         # Fallback to Otsu
-        return segment_otsu_watershed(image, min_nucleus_area)
+        return segment_otsu_watershed(
+            image,
+            min_nucleus_area=min_nucleus_area,
+            nuclei_are_dark=nuclei_are_dark,
+        )
 
     binary = best_binary
 
@@ -441,9 +525,9 @@ def segment_nuclei(
     if method in ("li", "otsu"):
         if h_channel is not None:
             return segment_otsu_watershed(h_channel, min_nucleus_area,
-                                          threshold_method=method)
+                                          threshold_method=method, **kwargs)
         return segment_otsu_watershed(image, min_nucleus_area,
-                                      threshold_method=method)
+                                      threshold_method=method, **kwargs)
     elif method == "adaptive":
         return segment_adaptive_watershed(
             image, h_channel, min_nucleus_area, **kwargs

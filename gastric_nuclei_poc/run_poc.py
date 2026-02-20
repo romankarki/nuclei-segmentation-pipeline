@@ -70,17 +70,19 @@ def run_pipeline(image, method_name):
 
     elif method_name == "Macenko + Otsu":
         norm, h_ch, _ = normalize_macenko(image)
-        seg, _ = segment_otsu_watershed(h_ch)
+        # Invert H channel for this implementation so nuclei are dark for Li.
+        seg, _ = segment_otsu_watershed(255 - h_ch)
         return seg
 
     elif method_name == "Ruifrok + Otsu":
         result = deconvolve_ruifrok(image)
-        seg, _ = segment_otsu_watershed(result["hematoxylin"])
+        # Reconstructed RGB is more stable than direct H-channel polarity here.
+        seg, _ = segment_otsu_watershed(result["normalized"])
         return seg
 
     elif method_name == "PCA Deconv + Otsu":
         result = deconvolve_pca(image)
-        seg, _ = segment_otsu_watershed(result["hematoxylin"])
+        seg, _ = segment_otsu_watershed(result["normalized"])
         return seg
 
     elif method_name == "Macenko + Adaptive WS":
