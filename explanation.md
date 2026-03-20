@@ -142,24 +142,28 @@
 
 ### Baseline vs Paper Method (Cell 21)
 
-**What you see:** Side-by-side comparison of no-preprocessing baseline vs Macenko+Li pipeline on four images.
+**What you see:** Side-by-side comparison of no-preprocessing baseline vs Macenko+Li pipeline on four carefully chosen images. F1 scores are shown on each overlay.
 
-**This is the most important visualization for the paper's thesis.** Look at the overlays:
+**This is the most important visualization for the paper's thesis.** The four rows tell the full story:
 
-- **The baseline (no normalization) is wildly inconsistent.** On some images it works well (F1~0.8), on others it completely fails (F1~0.02). The standard deviation is 0.305---it's basically a coin flip whether it works.
-- **The paper's method (Macenko + Li) is much more consistent.** Standard deviation drops from 0.305 to 0.145. Even when it's not perfect, it's never catastrophically wrong.
-- The most dramatic example: **TCGA-AY-A8YK** goes from F1=0.017 (baseline, essentially zero detection) to F1=0.739 (paper method). The baseline couldn't find any nuclei at all in this image because the staining was unusual; Macenko normalization fixed the color profile.
+**Rows 1-3: Where baseline CATASTROPHICALLY FAILS and Macenko rescues:**
+- **TCGA-DK-A2I6** (row 1): Baseline F1=0.006 vs Macenko F1=0.752. The baseline detects virtually nothing---the overlay is almost entirely purple (missed nuclei). Macenko rescues it completely.
+- **TCGA-49-4488** (row 2): Baseline F1=0.027 vs Macenko F1=0.767. Same story---unusual staining means the global threshold picks the wrong level. Macenko normalizes the color first, so the threshold works.
+- **TCGA-B0-5698** (row 3): Baseline F1=0.484 vs Macenko F1=0.766. A moderate case where normalization provides a clear improvement.
 
-**Our measured results across all 37 MoNuSeg images:**
+**Row 4: Where baseline ALREADY works well (honest tradeoff):**
+- **TCGA-18-5592** (row 4): Baseline F1=0.806 vs Macenko F1=0.675. On this well-stained image, the raw grayscale has strong contrast and the baseline threshold works great. Macenko's hematoxylin extraction actually reduces contrast slightly, hurting performance.
+
+**The nuanced takeaway:** Macenko doesn't beat baseline on every single image---it wins on 14/37 by F1. But it **eliminates all catastrophic failures** (the ~10 images where baseline gets F1 near 0). This is why the aggregate numbers favor Macenko:
 
 | Method | F1 (mean +/- std) | AJI (mean) |
 |--------|-------------------|------------|
 | Baseline (no normalization) | 0.555 +/- 0.305 | 0.151 |
 | **Macenko + Li + Watershed** | **0.622 +/- 0.145** | **0.301** |
 
-- **F1 improved by 12.1%** (relative), from 0.555 to 0.622
-- **AJI nearly doubled** (+99.6%), from 0.151 to 0.301
-- **Consistency improved dramatically**: std dropped from 0.305 to 0.145
+- **F1 improved by 12.1%** (from 0.555 to 0.622)---driven by rescuing failure cases
+- **AJI nearly doubled** (+99.6%, from 0.151 to 0.301)---AJI is harsher on catastrophic failures
+- **Consistency doubled**: std dropped from 0.305 to 0.145. For a clinical tool, this reliability matters more than peak performance on easy cases.
 
 ---
 
