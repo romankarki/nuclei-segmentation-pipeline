@@ -1,5 +1,5 @@
 """
-Blur detection and removal for histopathology images.
+Blur detection and removal for histopathology images. (to improve accuracy with frequency measure)
 
 Implements two approaches:
 1. Laplacian Variance method (simple, fast baseline)
